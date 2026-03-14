@@ -1,3 +1,84 @@
-.env
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Виртуальное окружение ---
 .venv/
+venv/
+ENV/
+env/
+.conda/
+
+# --- IDE ---
 .idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# --- База данных ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# --- Логи ---
+*.log
+logs/
+
+# --- Окружение и секреты ---
+.env
+.env.local
+.env.*.local
+*.env
+config.local.py
+secrets/
+credentials/
+
+# --- Тесты и покрытие ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- Документация ---
+docs/_build/
+site/
+
+# --- Временные файлы ---
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# --- Node ---
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# --- Docker ---
+.docker/
+*.dockerfile.local
