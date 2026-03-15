@@ -4,7 +4,7 @@ from sqlalchemy import ForeignKey, Text, String, Enum, Index, UniqueConstraint, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base, int_pk
-from app.models.enums import ReviewStatus, Severity
+from app.models.enums import ReviewStatus, Severity, SuggestionType
 
 
 class Review(Base):
@@ -123,7 +123,11 @@ class LLMSuggestion(Base):
         nullable=False
     )
     line_number: Mapped[int] = mapped_column(nullable=False)
-    suggestion_type: Mapped[str] = mapped_column(String(20), default="comment")
+    suggestion_type: Mapped[SuggestionType] = mapped_column(
+        Enum(SuggestionType),
+        nullable=False,
+        default=SuggestionType.BEST_PRACTICE
+    )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[Severity] = mapped_column(
         Enum(Severity),

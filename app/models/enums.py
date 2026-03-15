@@ -13,3 +13,13 @@ class Severity(str, Enum):
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
+
+
+class SuggestionType(str, Enum):
+    CODE_FIX = "code_fix"
+    BEST_PRACTICE = "best_practice"
+    SECURITY = "security"
+    PERFORMANCE = "performance"
+    DOCUMENTATION = "documentation"
+    NAMING = "naming"
+    STYLE = "style"
