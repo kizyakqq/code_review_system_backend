@@ -8,8 +8,9 @@ from app.models.enums import Severity, SuggestionType
 
 class LinterIssueBase(BaseModel):
     line_number: int
-    message: str
+    column: int = 0
     rule_code: Optional[str] = None
+    message: str
     severity: Severity
     tool_name: Optional[str] = None
 

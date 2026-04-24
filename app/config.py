@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     APP_HOST: str
     APP_PORT: int
 
+    # Linter
+    MAX_CODE_SIZE: int
+    LINTER_TIMEOUT: int
+    MAX_LINE_LENGTH: int
+
     # DB
     DB_USER: str
     DB_PASSWORD: str

@@ -13,8 +13,6 @@ async def test_generate_review_success():
     assert response.success is True
     assert response.content != ""
     assert response.model == "llama3"
-    print(response.success)
-    print(response.error_message)
     await llm.close()
 
 
