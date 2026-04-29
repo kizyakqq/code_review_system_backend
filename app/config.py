@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     APP_HOST: str
     APP_PORT: int
 
+    # Security
+    SECRET_KEY: str
+    ALGORITHM: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+
     # Linter
     MAX_CODE_SIZE: int
     LINTER_TIMEOUT: int
