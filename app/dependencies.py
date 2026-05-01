@@ -3,7 +3,7 @@ from datetime import timedelta, datetime, UTC
 from typing import Optional, Any
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jwt import PyJWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from app.database import async_session_maker
 from app.models import User
 from app.schemas.auth import TokenData
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+security = HTTPBearer()
 
 
 def create_access_token(data: dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
@@ -49,9 +49,10 @@ async def get_db() -> AsyncSession:
 
 
 async def get_current_user(
-        token: str = Depends(oauth2_scheme),
+        credentials: HTTPAuthorizationCredentials = Depends(security),
         db: AsyncSession = Depends(get_db)
 ) -> User:
+    token = credentials.credentials
     token_data = verify_token(token)
     if not token_data or not token_data.sub:
         raise HTTPException(

@@ -102,7 +102,7 @@ class LinterIssue(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     review: Mapped["Review"] = relationship("Review", back_populates="linter_issues")
-    rule: Mapped["LinterRule"] = relationship("LinterRule", back_populates="linter_issues")
+    rule: Mapped["LinterRule"] = relationship("LinterRule", back_populates="issues")
 
     def __str__(self):
         return (f"{self.__class__.__name__}(id={self.id}, "
