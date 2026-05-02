@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, status, UploadFile, File, Form, Depends, HTTPException
@@ -65,10 +66,23 @@ async def create_code_review(
     logger.info(f"Review created: id={review.id}, user_id={current_user.id}, filename={file.filename}")
 
     try:
-        linter_service = LinterService()
-        linter_issues = await linter_service.run(code, file.filename)
+        linter_task = LinterService().run(code, file.filename)
+        llm_task = LLMService().generate_structured_review(code, "system", model_name)
 
-        rule_codes = {issue.rule_code for issue in linter_issues}
+        linter_issues, llm_result = await asyncio.gather(linter_task, llm_task, return_exceptions=True)
+
+        if isinstance(linter_issues, Exception):
+            logger.error(f"Linter failed: {linter_issues}")
+            linter_issues = []
+
+        llm_failed = isinstance(llm_result, Exception) or not llm_result.success
+        if llm_failed:
+            error_msg = str(llm_result) if isinstance(llm_result, Exception) else llm_result.error_message
+            logger.warning(f"LLM failed: {error_msg}")
+
+        rule_codes = {issue.rule_code for issue in linter_issues if issue.rule_code}
+        rules_map = {}
+
         if rule_codes:
             existing_rules = await db.execute(
                 select(LinterRule).where(
@@ -77,10 +91,11 @@ async def create_code_review(
                 )
             )
             rules_map = {r.rule_code: r for r in existing_rules.scalars().all()}
-        else:
-            rules_map = {}
 
         for issue in linter_issues:
+            if not issue.rule_code:
+                continue
+
             rule = rules_map.get(issue.rule_code)
             if not rule:
                 rule = LinterRule(
@@ -93,45 +108,36 @@ async def create_code_review(
                 await db.flush()
                 rules_map[issue.rule_code] = rule
 
-            linter_issue = LinterIssue(
+            db.add(LinterIssue(
                 review_id=review.id,
                 rule_id=rule.id,
                 line_number=issue.line_number,
                 message=issue.message,
                 severity=issue.severity
-            )
-            db.add(linter_issue)
+            ))
 
-        llm_service = LLMService()
-        llm_response = await llm_service.generate_structured_review(
-            code=code,
-            template_name="system",
-            model=model_name
-        )
+        max_lines = len(code.splitlines())
+        if not llm_failed and llm_result.suggestions:
+            for suggestion in llm_result.suggestions:
+                if 1 <= suggestion.line_number <= max_lines:
+                    db.add(LLMSuggestion(
+                        review_id=review.id,
+                        line_number=suggestion.line_number,
+                        suggestion_type=suggestion.suggestion_type,
+                        text=suggestion.text,
+                        severity=suggestion.severity
+                    ))
 
-        if llm_response.success:
-            review.llm_summary = llm_response.summary
-            review.status = ReviewStatus.COMPLETED
-
-            for suggestion in llm_response.suggestions:
-                llm_suggestion = LLMSuggestion(
-                    review_id=review.id,
-                    line_number=suggestion.line_number,
-                    suggestion_type=suggestion.suggestion_type,
-                    text=suggestion.text,
-                    severity=suggestion.severity
-                )
-                db.add(llm_suggestion)
-
-            logger.info(
-                f"Review completed: id={review.id}, "
-                f"summary_len={len(llm_response.summary)}, "
-                f"suggestions_count={len(llm_response.suggestions)}"
-            )
-        else:
+        if llm_failed and not linter_issues:
             review.status = ReviewStatus.FAILED
-            review.llm_summary = f"Error: {llm_response.error_message}"
-            logger.warning(f"LLM analysis failed: id={review.id}, error={llm_response.error_message}")
+            review.llm_summary = f"LLM error: {getattr(llm_result, 'error_message', str(llm_result))}"
+        else:
+            review.status = ReviewStatus.COMPLETED
+            review.llm_summary = getattr(
+                llm_result,
+                "summary",
+                "Analysis completed with partial data.")[
+                                 :10000] if not llm_failed else "LLM analysis failed. Linter results only."
 
         await db.commit()
 
@@ -253,27 +259,3 @@ async def delete_review(
 
     await db.delete(review)
     await db.commit()
-
-
-@router.get("/debug/{review_id}")
-async def debug_review(review_id: int, db: AsyncSession = Depends(get_db)):
-    review = await db.get(Review, review_id)
-    if not review:
-        return {"error": "not found"}
-
-    try:
-        # Пробуем сериализовать вручную с подробным выводом
-        data = ReviewResponse.model_validate(review)
-        return {
-            "success": True,
-            "data": data.model_dump(mode="json", exclude_unset=True)
-        }
-    except Exception as e:
-        # Выводим максимально подробно
-        import traceback
-        return {
-            "success": False,
-            "error": str(e),
-            "type": type(e).__name__,
-            "traceback": traceback.format_exc()
-        }

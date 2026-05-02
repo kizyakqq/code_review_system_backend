@@ -110,6 +110,14 @@ class LinterIssue(Base):
     review: Mapped["Review"] = relationship("Review", back_populates="linter_issues")
     rule: Mapped["LinterRule"] = relationship("LinterRule", back_populates="issues")
 
+    @property
+    def rule_code(self) -> Optional[str]:
+        return self.rule.rule_code if self.rule else None
+
+    @property
+    def tool_name(self) -> Optional[str]:
+        return self.rule.tool_name if self.rule else None
+
     def __str__(self):
         return (f"{self.__class__.__name__}(id={self.id}, "
                 f"review_id={self.review_id!r}, "

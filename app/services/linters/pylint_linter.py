@@ -115,7 +115,7 @@ class LinterService:
                                 rule_code=item.get("symbol", "UNKNOWN"),
                                 message=item.get("message", ""),
                                 severity=self._map_severity(item.get("type", "error")),
-                                source="pylint"
+                                tool_name="pylint"
                             ))
                 except json.JSONDecodeError as e:
                     logger.error(f"Не удалось запарсить вывод: {e}")
