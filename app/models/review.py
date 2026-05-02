@@ -101,6 +101,12 @@ class LinterIssue(Base):
     line_number: Mapped[int] = mapped_column(nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
+    severity: Mapped[Severity] = mapped_column(
+        Enum(Severity),
+        nullable=False,
+        default=Severity.INFO
+    )
+
     review: Mapped["Review"] = relationship("Review", back_populates="linter_issues")
     rule: Mapped["LinterRule"] = relationship("LinterRule", back_populates="issues")
 

@@ -1,12 +1,16 @@
 import functools
+import json
 import logging
 import pathlib
+import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import settings
+from app.schemas.issues import LLMSuggestionBase
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +19,15 @@ logger = logging.getLogger(__name__)
 class LLMResponse:
     content: str
     model: str
+    success: bool
+    error_message: Optional[str] = None
+
+
+@dataclass
+class StructuredLLMResponse:
+    summary: str
+    suggestions: List[LLMSuggestionBase]
+    raw_response: str
     success: bool
     error_message: Optional[str] = None
 
@@ -111,3 +124,98 @@ class LLMService:
         except Exception as e:
             logger.exception(f"Ошибка при работе с LLM: {e}")
             return LLMResponse("", model, False, str(e))
+
+    def _extract_json_from_response(self, text: str) -> Optional[Dict[str, Any]]:
+        json_match = re.search(r'\{[\s\S]*}', text)
+        if not json_match:
+            return None
+
+        json_str = json_match.group(0)
+
+        json_str = re.sub(r'^```(?:json)?\s*', '', json_str)
+        json_str = re.sub(r'\s*```$', '', json_str)
+
+        try:
+            return json.loads(json_str.strip())
+        except json.JSONDecodeError:
+            return None
+
+    def _validate_suggestion(self, suggestion: Dict[str, Any]) -> Optional[LLMSuggestionBase]:
+        try:
+            data = suggestion.copy()
+            if "suggestion_type" in data:
+                data['suggestion_type'] = data['suggestion_type'].lower().replace('-', '_')
+            if 'severity' in data:
+                data['severity'] = data['severity'].lower()
+
+            return LLMSuggestionBase(**data)
+
+        except (ValidationError, AttributeError, TypeError) as e:
+            logger.warning(f"Invalid suggestion skipped: {suggestion}, error: {e}")
+            return None
+
+    async def generate_structured_review(
+            self,
+            code: str,
+            template_name: str = "system",
+            model: Optional[str] = None,
+            max_retries: int = 2
+    ) -> StructuredLLMResponse:
+        for attempt in range(max_retries + 1):
+            llm_response = await self.generate_review(
+                code=code,
+                template_name=template_name,
+                model=model
+            )
+
+            if not llm_response.success:
+                return StructuredLLMResponse(
+                    summary="",
+                    suggestions=[],
+                    raw_response=llm_response.content,
+                    success=False,
+                    error_message=llm_response.error_message
+                )
+
+            parsed = self._extract_json_from_response(llm_response.content)
+
+            if not parsed:
+                if attempt < max_retries:
+                    logger.warning(f"Attempt {attempt + 1}: JSON not found, retrying...")
+                    continue
+                return StructuredLLMResponse(
+                    summary=llm_response.content[:2000],
+                    suggestions=[],
+                    raw_response=llm_response.content,
+                    success=True,
+                    error_message="Could not parse JSON from LLM response"
+                )
+
+            suggestions = []
+            raw_suggestions = parsed.get("suggestions", [])
+
+            if isinstance(raw_suggestions, list):
+                for item in raw_suggestions:
+                    if isinstance(item, dict):
+                        validated = self._validate_suggestion(item)
+                        if validated:
+                            suggestions.append(validated)
+
+            summary = parsed.get("summary", "")
+            if not summary and llm_response.content:
+                summary = llm_response.content[:2000]
+
+            return StructuredLLMResponse(
+                summary=summary[:10000],
+                suggestions=suggestions,
+                raw_response=llm_response.content,
+                success=True
+            )
+
+        return StructuredLLMResponse(
+            summary="",
+            suggestions=[],
+            raw_response="",
+            success=False,
+            error_message="Failed to get valid JSON response after retries"
+        )

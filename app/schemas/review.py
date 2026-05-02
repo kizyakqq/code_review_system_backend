@@ -28,7 +28,7 @@ class ReviewResponse(ReviewBase):
     linter_issues: List[LinterIssueResponse] = []
     llm_suggestions: List[LLMSuggestionResponse] = []
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
 class ReviewShortResponse(BaseModel):
@@ -41,7 +41,7 @@ class ReviewShortResponse(BaseModel):
 
 
 class ReviewDetailResponse(ReviewResponse):
-    code_content: str
+    pass
 
 
 class ReviewListResponse(BaseModel):

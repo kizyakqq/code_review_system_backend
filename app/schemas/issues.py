@@ -11,15 +11,15 @@ class LinterIssueBase(BaseModel):
     column: int = 0
     rule_code: Optional[str] = None
     message: str
-    severity: Severity
     tool_name: Optional[str] = None
+    severity: Severity
 
 
 class LinterIssueResponse(LinterIssueBase):
     id: int
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
 class LLMSuggestionBase(BaseModel):
@@ -33,4 +33,4 @@ class LLMSuggestionResponse(LLMSuggestionBase):
     id: int
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)

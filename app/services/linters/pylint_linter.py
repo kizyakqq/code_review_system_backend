@@ -56,6 +56,7 @@ class LinterService:
     async def run(self, code: str, filename: Optional[str] = None) -> List[LinterIssueBase]:
         issues: List[LinterIssueBase] = []
         temp_path = ""
+        code = code.replace('\r\n', '\n').replace('\r', '\n')
 
         try:
             self._validate_code_size(code)

@@ -1,10 +1,11 @@
 import asyncio
-import logging
 import sys
-from contextlib import asynccontextmanager
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    from app.services.llm import LLMService
+    llm = LLMService()
+    await llm.close()
     logger.info("Shutting down application...")
 
 

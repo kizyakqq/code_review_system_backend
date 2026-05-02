@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, status, UploadFile, File, Form, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,8 @@ from app.models.enums import ReviewStatus
 from app.schemas.review import ReviewResponse, ReviewListResponse, ReviewShortResponse, ReviewDetailResponse
 from app.services.linters.pylint_linter import LinterService
 from app.services.llm import LLMService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reviews", tags=["Code Reviews"])
 
@@ -58,20 +62,24 @@ async def create_code_review(
     await db.flush()
     await db.refresh(review)
 
+    logger.info(f"Review created: id={review.id}, user_id={current_user.id}, filename={file.filename}")
+
     try:
         linter_service = LinterService()
         linter_issues = await linter_service.run(code, file.filename)
 
         rule_codes = {issue.rule_code for issue in linter_issues}
-        existing_rules = await db.execute(
-            select(LinterRule).where(
-                (LinterRule.tool_name == "pylint") &
-                (LinterRule.rule_code.in_(rule_codes))
+        if rule_codes:
+            existing_rules = await db.execute(
+                select(LinterRule).where(
+                    (LinterRule.tool_name == "pylint") &
+                    (LinterRule.rule_code.in_(rule_codes))
+                )
             )
-        )
-        rules_map = {r.rule_code: r for r in existing_rules.scalars().all()}
+            rules_map = {r.rule_code: r for r in existing_rules.scalars().all()}
+        else:
+            rules_map = {}
 
-        new_rules = []
         for issue in linter_issues:
             rule = rules_map.get(issue.rule_code)
             if not rule:
@@ -82,41 +90,66 @@ async def create_code_review(
                     severity=issue.severity
                 )
                 db.add(rule)
-                new_rules.append(rule)
+                await db.flush()
                 rules_map[issue.rule_code] = rule
 
-        if new_rules:
-            await db.flush()
-
-        for issue in linter_issues:
-            rule = rules_map[issue.rule_code]
             linter_issue = LinterIssue(
                 review_id=review.id,
                 rule_id=rule.id,
                 line_number=issue.line_number,
-                message=issue.message
+                message=issue.message,
+                severity=issue.severity
             )
             db.add(linter_issue)
 
         llm_service = LLMService()
-        llm_response = await llm_service.generate_review(
+        llm_response = await llm_service.generate_structured_review(
             code=code,
             template_name="system",
             model=model_name
         )
 
         if llm_response.success:
-            review.llm_summary = llm_response.content[:10000]
+            review.llm_summary = llm_response.summary
             review.status = ReviewStatus.COMPLETED
+
+            for suggestion in llm_response.suggestions:
+                llm_suggestion = LLMSuggestion(
+                    review_id=review.id,
+                    line_number=suggestion.line_number,
+                    suggestion_type=suggestion.suggestion_type,
+                    text=suggestion.text,
+                    severity=suggestion.severity
+                )
+                db.add(llm_suggestion)
+
+            logger.info(
+                f"Review completed: id={review.id}, "
+                f"summary_len={len(llm_response.summary)}, "
+                f"suggestions_count={len(llm_response.suggestions)}"
+            )
         else:
             review.status = ReviewStatus.FAILED
+            review.llm_summary = f"Error: {llm_response.error_message}"
+            logger.warning(f"LLM analysis failed: id={review.id}, error={llm_response.error_message}")
 
         await db.commit()
-        await db.refresh(review)
+
+        review_with_relations = await db.execute(
+            select(Review)
+            .options(
+                selectinload(Review.linter_issues).joinedload(LinterIssue.rule),
+                selectinload(Review.llm_suggestions)
+            )
+            .where(Review.id == review.id)
+        )
+        review = review_with_relations.scalar_one()
 
     except Exception as e:
+        await db.rollback()
         review.status = ReviewStatus.FAILED
         await db.commit()
+        logger.exception(f"Review analysis failed: id={review.id}, error={e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analysis failed: {str(e)}"
@@ -132,6 +165,11 @@ async def list_reviews(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
 ):
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 10
+
     offset = (page - 1) * page_size
 
     count_query = select(func.count()).select_from(Review).where(
@@ -167,7 +205,7 @@ async def get_review(
     query = (
         select(Review)
         .options(
-            selectinload(Review.linter_issues).selectinload(LinterIssue.rule),
+            selectinload(Review.linter_issues).joinedload(LinterIssue.rule),
             selectinload(Review.llm_suggestions)
         )
         .where(Review.id == review_id)
@@ -215,3 +253,27 @@ async def delete_review(
 
     await db.delete(review)
     await db.commit()
+
+
+@router.get("/debug/{review_id}")
+async def debug_review(review_id: int, db: AsyncSession = Depends(get_db)):
+    review = await db.get(Review, review_id)
+    if not review:
+        return {"error": "not found"}
+
+    try:
+        # Пробуем сериализовать вручную с подробным выводом
+        data = ReviewResponse.model_validate(review)
+        return {
+            "success": True,
+            "data": data.model_dump(mode="json", exclude_unset=True)
+        }
+    except Exception as e:
+        # Выводим максимально подробно
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
